@@ -1,24 +1,26 @@
 const line = require("@line/bot-sdk");
 const express = require("express");
 const https = require("https");
-const {
-  Client
-} = require("pg");
-const {
-  promises
-} = require("fs");
-const {
-  resolve
-} = require("path");
+const { Client } = require("pg");
+const { promises } = require("fs");
+const { resolve } = require("path");
 require("dotenv").config();
 const db = require("./db");
+// const { default: axios } = require("axios");
+const axios = require("axios");
+const delay = require("delay");
 
 const CONFIG = {
   channelAccessToken: process.env.LINE_ACCESS_TOKEN,
   channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
 
+const rakutenId = process.env.RAKUTEN_TRAVEL_VACANT_HOTEL_API_KEY;
+
 const PORT = 3000;
+
+const baseUrl =
+  "https://app.rakuten.co.jp/services/api/Travel/VacantHotelSearch/20170426";
 
 let date = new Date();
 let year = date.getFullYear().toString();
@@ -59,23 +61,28 @@ const startService = (req) => {
   };
   return JSON.stringify({
     replyToken: req.body.events[0].replyToken,
-    messages: [{
-      type: "template",
-      altText: "確認いたしますので、少々お待ちください",
-      template: {
-        type: "buttons",
-        title: "確認いたしますので少々お待ちください",
-        text: "サービスを開始するには以下のボタンを押してください",
-        actions: [{
-          type: "postback",
-          label: "スタート",
-          data: JSON.stringify(start),
-        }, ],
+    messages: [
+      {
+        type: "template",
+        altText: "確認いたしますので、少々お待ちください",
+        template: {
+          type: "buttons",
+          title: "確認いたしますので少々お待ちください",
+          text: "サービスを開始するには以下のボタンを押してください",
+          actions: [
+            {
+              type: "postback",
+              label: "スタート",
+              data: JSON.stringify(start),
+            },
+          ],
+        },
       },
-    }, ],
+    ],
   });
 };
 
+// どのサービスを使うか選択
 const selectService = (req) => {
   const register = {
     type: "register",
@@ -90,45 +97,51 @@ const selectService = (req) => {
 
   return JSON.stringify({
     replyToken: req.body.events[0].replyToken,
-    messages: [{
-      type: "template",
-      altText: "ご希望のサービスを教えてください",
-      template: {
-        type: "buttons",
-        title: "ディズニーホテルキャンセル速報",
-        text: "ご希望のサービスを教えてください",
-        actions: [{
-            type: "postback",
-            label: "通知したいホテルと日付の登録",
-            data: JSON.stringify(register),
-          },
-          {
-            type: "postback",
-            label: "通知ホテルの確認",
-            data: JSON.stringify(check),
-          },
-          {
-            type: "postback",
-            label: "通知ホテルの削除",
-            data: JSON.stringify(unregisterService),
-          },
-        ],
+    messages: [
+      {
+        type: "template",
+        altText: "ご希望のサービスを教えてください",
+        template: {
+          type: "buttons",
+          title: "ディズニーホテルキャンセル速報",
+          text: "ご希望のサービスを教えてください",
+          actions: [
+            {
+              type: "postback",
+              label: "ホテルと日付の登録",
+              // データのタイプ
+              data: JSON.stringify(register),
+            },
+            {
+              type: "postback",
+              label: "ホテルの確認",
+              data: JSON.stringify(check),
+            },
+            {
+              type: "postback",
+              label: "ホテルの削除",
+              data: JSON.stringify(unregisterService),
+            },
+          ],
+        },
       },
-    }, ],
+    ],
   });
 };
 
 const selectRegisterHotel = (req) => {
   return JSON.stringify({
     replyToken: req.body.events[0].replyToken,
-    messages: [{
+    messages: [
+      {
         type: "template",
         altText: "ホテルを選択してください",
         template: {
           type: "buttons",
           title: "ディズニーホテル",
           text: "ディズニーホテルを選択してください",
-          actions: [{
+          actions: [
+            {
               type: "datetimepicker",
               label: miraCosta.hotelName,
               data: JSON.stringify(miraCosta),
@@ -165,7 +178,8 @@ const selectRegisterHotel = (req) => {
           type: "buttons",
           title: "ディズニーホテル",
           text: "ディズニーホテルを選択してください",
-          actions: [{
+          actions: [
+            {
               type: "datetimepicker",
               label: ambassador.hotelName,
               data: JSON.stringify(ambassador),
@@ -190,122 +204,251 @@ const selectRegisterHotel = (req) => {
   });
 };
 
+// ホテルの空きを確認する
 const checkHotels = async (req) => {
-  return new Promise((resolve) => {
-    const userId = req.body.events[0].source.userId;
-    const checkSql = {
-      text: "select hotel_name, date from t_cancels join m_hotels on t_cancels.hotel_number = m_hotels.hotel_number where user_id = $1 order by created desc limit 3;",
-      values: [userId],
-    };
-    db.doQuery(checkSql).then((cancels) => {
-      let cancelText = "通知する日付とホテルです。\n";
-      for (let cancel of cancels.rows) {
-        const cancelDate = cancel["date"];
-        const cancelYear = cancelDate.getFullYear().toString();
-        const cancelMonth = (cancelDate.getMonth() + 1).toString();
-        const cancelDay = cancelDate.getDate().toString();
-        const formattedCancelDate =
-          cancelYear + "/" + cancelMonth + "/" + cancelDay;
-        console.log(formattedCancelDate);
-        cancelText += formattedCancelDate + " ";
-        cancelText += cancel["hotel_name"] + "\n";
+  // return new Promise((resolve) => {
+  const userId = req.body.events[0].source.userId;
+  const checkSql = {
+    text:
+      "select hotel_name, date, t_cancels.hotel_number from t_cancels join m_hotels on t_cancels.hotel_number = m_hotels.hotel_number where user_id = $1 order by created desc limit 3;",
+    values: [userId],
+  };
+
+  const cancels = await db.doQuery(checkSql);
+  let cancelText = "通知する日付とホテルです。\n";
+  let cancelList = [];
+  for (let cancel of cancels.rows) {
+    let cancelElement = {};
+    const cancelDate = cancel["date"];
+    const hotelNumber = cancel["hotel_number"];
+    const cancelYear = cancelDate.getFullYear().toString();
+    const cancelMonth = (cancelDate.getMonth() + 1).toString().padStart(2, "0");
+    const cancelDay = cancelDate.getDate().toString().padStart(2, "0");
+    const checkoutDay = (cancelDate.getDate() + 1).toString().padStart(2, "0");
+    const formattedCancelDate = cancelMonth + "/" + cancelDay;
+    const requestCheckinDate = cancelYear + "-" + cancelMonth + "-" + cancelDay;
+    const requestCheckoutDate =
+      cancelYear + "-" + cancelMonth + "-" + checkoutDay;
+    let requestUrl = new URL(baseUrl);
+    requestUrl.searchParams.set("checkinDate", requestCheckinDate);
+    requestUrl.searchParams.set("checkoutDate", requestCheckoutDate);
+    requestUrl.searchParams.set("hotelNo", hotelNumber);
+    requestUrl.searchParams.set("applicationId", rakutenId);
+    requestUrl.searchParams.set("format", "json");
+    console.log(formattedCancelDate);
+    cancelText += formattedCancelDate + " ";
+    cancelText += cancel["hotel_name"];
+
+    let res = "";
+    const today = new Date();
+    try {
+      // 前の日付だったらthrowされているか確認
+      if (cancelDate < today) {
+        console.log("dddd");
+        throw new Error();
       }
-      resolve(
-        JSON.stringify({
-          replyToken: req.body.events[0].replyToken,
-          messages: [{
-            type: "text",
-            text: cancelText,
-          }, ],
-        })
-      );
-    });
+      await delay(1000);
+      res = await axios.get(requestUrl.href);
+      console.log(requestUrl.href);
+      cancelText += ":空き ◯" + "\n";
+    } catch (e) {
+      console.log(e);
+      cancelText += ":空き ×" + "\n";
+      console.log(requestUrl.href);
+    }
+  }
+  console.log(cancelText);
+  return JSON.stringify({
+    replyToken: req.body.events[0].replyToken,
+    messages: [
+      {
+        type: "text",
+        text: cancelText,
+      },
+    ],
   });
+
+  // });
 };
 
+// 通知解除するホテルの選択
 const selectUnregisterHotel = async (req) => {
-  console.log("unregisterHotelのメソッドです")
-  return new Promise((resolve) => {
-    const userId = req.body.events[0].source.userId;
-    const checkSql = {
-      text: "select hotel_name, t_cancels.hotel_number, date from t_cancels join m_hotels on t_cancels.hotel_number = m_hotels.hotel_number where user_id = $1 order by created desc limit 3;",
-      values: [userId],
-    };
-    db.doQuery(checkSql).then((cancels) => {
-      let cancelText = "通知する日付とホテルです。\n";
-      let cancelList = []
-      for (let cancel of cancels.rows) {
-        let cancelElement = {
-
-        }
-        const cancelDate = cancel["date"];
-        const cancelYear = cancelDate.getFullYear().toString();
-        const cancelMonth = (cancelDate.getMonth() + 1).toString();
-        const cancelDay = cancelDate.getDate().toString();
-        const formattedCancelDate = cancelMonth + "/" + cancelDay;
-        const hotelName = cancel["hotel_name"];
-        const hotelNumber = cancel["hotel_number"];
-        cancelElement.type = "unregisterHotel"
-        cancelElement.date = cancelYear + "-" + cancelMonth + "-" + cancelDay
-        // cancelElement.hotelName = hotelName
-        cancelElement.hotelNumber = hotelNumber
-        cancelElement.label = formattedCancelDate + " " + hotelName
-        cancelList.push(cancelElement)
+  console.log("unregisterHotelのメソッドです");
+  const userId = req.body.events[0].source.userId;
+  const checkSql = {
+    text:
+      "select hotel_name, t_cancels.hotel_number, date from t_cancels join m_hotels on t_cancels.hotel_number = m_hotels.hotel_number where user_id = $1 order by created desc limit 3;",
+    values: [userId],
+  };
+  const cancels = await db.doQuery(checkSql);
+  let cancelText = "通知する日付とホテルです。\n";
+  let cancelList = [];
+  for (let cancel of cancels.rows) {
+    let cancelElement = {};
+    const cancelDate = cancel["date"];
+    const cancelYear = cancelDate.getFullYear().toString();
+    const cancelMonth = (cancelDate.getMonth() + 1).toString();
+    const cancelDay = cancelDate.getDate().toString();
+    const checkoutDay = (cancelDate.getDate() + 1).toString().padStart(2, "0");
+    const formattedCancelDate = cancelMonth + "/" + cancelDay;
+    const hotelName = cancel["hotel_name"];
+    const hotelNumber = cancel["hotel_number"];
+    const requestCheckinDate = cancelYear + "-" + cancelMonth + "-" + cancelDay;
+    const requestCheckoutDate =
+      cancelYear + "-" + cancelMonth + "-" + checkoutDay;
+    cancelElement.date = cancelYear + "-" + cancelMonth + "-" + cancelDay;
+    let requestUrl = new URL(baseUrl);
+    requestUrl.searchParams.set("checkinDate", requestCheckinDate);
+    requestUrl.searchParams.set("checkoutDate", requestCheckoutDate);
+    requestUrl.searchParams.set("hotelNo", hotelNumber);
+    requestUrl.searchParams.set("applicationId", rakutenId);
+    requestUrl.searchParams.set("format", "json");
+    const today = new Date();
+    let vacant = "";
+    try {
+      if (cancelDate < today) {
+        throw new Error();
       }
-      console.log("それぞれのcancelList----------")
-      console.log(cancelList[0])
-      console.log(cancelList[1])
-      console.log(cancelList[2])
-      resolve(
-        JSON.stringify({
-          replyToken: req.body.events[0].replyToken,
-          messages: [{
-            type: "template",
-            altText: "解除するホテル日時を選択してください",
-            template: {
-              type: "buttons",
-              title: "ホテル登録解除",
-              text: "通知解除するホテル日時を選択してください",
-              actions: [{
-                  type: "postback",
-                  label: cancelList[0].label,
-                  data: JSON.stringify(cancelList[0])
-                },
-                {
-                  type: "postback",
-                  label: cancelList[1].label,
-                  data: JSON.stringify(cancelList[1])
-                },
-                {
-                  type: "postback",
-                  label: cancelList[2].label,
-                  data: JSON.stringify(cancelList[2])
-                },
-              ]
+      await delay(1000);
+      res = await axios.get(requestUrl.href);
+      vacant = "空き◯";
+      cancelElement.vacant = vacant;
+    } catch (e) {
+      vacant = "空き×";
+      cancelElement.vacant = vacant;
+    }
 
-            }
-          }, ],
-        })
-      );
+    cancelElement.type = "unregisterHotel";
+
+    // cancelElement.hotelName = hotelName
+    cancelElement.hotelNumber = hotelNumber;
+    cancelElement.label = formattedCancelDate + " " + hotelName + " " + vacant;
+    cancelList.push(cancelElement);
+  }
+  console.log("それぞれのcancelList----------");
+  console.log(cancelList[0]);
+  console.log(cancelList[1]);
+  console.log(cancelList[2]);
+
+  let registerHotel = "";
+  if (cancelList.length == 0) {
+    registerHotel = JSON.stringify({
+      replyToken: req.body.events[0].replyToken,
+      messages: [
+        {
+          type: "text",
+          text: "登録しているホテルがありません",
+        },
+      ],
     });
-  });
-}
+  }
+  if (cancelList.length == 1) {
+    registerHotel = JSON.stringify({
+      replyToken: req.body.events[0].replyToken,
+      messages: [
+        {
+          type: "template",
+          altText: "解除するホテル日時を選択してください",
+          template: {
+            type: "buttons",
+            title: "ホテル登録解除",
+            text: "通知解除するホテル日時を選択してください",
+            actions: [
+              {
+                type: "postback",
+                label: cancelList[0].label,
+                data: JSON.stringify(cancelList[0]),
+              },
+            ],
+          },
+        },
+      ],
+    });
+  }
 
+  if (cancelList.length == 2) {
+    registerHotel = JSON.stringify({
+      replyToken: req.body.events[0].replyToken,
+      messages: [
+        {
+          type: "template",
+          altText: "解除するホテル日時を選択してください",
+          template: {
+            type: "buttons",
+            title: "ホテル登録解除",
+            text: "通知解除するホテル日時を選択してください",
+            actions: [
+              {
+                type: "postback",
+                label: cancelList[0].label,
+                data: JSON.stringify(cancelList[0]),
+              },
+              {
+                type: "postback",
+                label: cancelList[1].label,
+                data: JSON.stringify(cancelList[1]),
+              },
+            ],
+          },
+        },
+      ],
+    });
+  }
+
+  if (cancelList.length == 3) {
+    registerHotel = JSON.stringify({
+      replyToken: req.body.events[0].replyToken,
+      messages: [
+        {
+          type: "template",
+          altText: "解除するホテル日時を選択してください",
+          template: {
+            type: "buttons",
+            title: "ホテル登録解除",
+            text: "通知解除するホテル日時を選択してください",
+            actions: [
+              {
+                type: "postback",
+                label: cancelList[0].label,
+                data: JSON.stringify(cancelList[0]),
+              },
+              {
+                type: "postback",
+                label: cancelList[1].label,
+                data: JSON.stringify(cancelList[1]),
+              },
+              {
+                type: "postback",
+                label: cancelList[2].label,
+                data: JSON.stringify(cancelList[2]),
+              },
+            ],
+          },
+        },
+      ],
+    });
+  }
+
+  return registerHotel;
+};
+
+// 通知を解除するメッセージ
 const confirmUnregister = (req) => {
   const hoge = req.body.events[0].postback.data;
   const unregisterHotel = JSON.parse(req.body.events[0].postback.data).label;
-  console.log(hoge)
-  console.log("----")
-  console.log(unregisterHotel)
+  console.log(hoge);
+  console.log("----");
+  console.log(unregisterHotel);
   return JSON.stringify({
     replyToken: req.body.events[0].replyToken,
-    messages: [{
-      type: "text",
-      text: unregisterHotel + "の通知登録を解除しました。"
-    }, ],
+    messages: [
+      {
+        type: "text",
+        text: unregisterHotel + "の通知を解除しました。",
+      },
+    ],
   });
-}
-
+};
 
 const confirmHotel = (req) => {
   const cancelDate = req.body.events[0].postback.params.date;
@@ -314,13 +457,16 @@ const confirmHotel = (req) => {
   const hotelName = hotel.hotelName;
   return JSON.stringify({
     replyToken: req.body.events[0].replyToken,
-    messages: [{
-      type: "text",
-      text: formattedCancelDate +
-        " " +
-        hotelName +
-        "のキャンセルが出たら通知します。",
-    }, ],
+    messages: [
+      {
+        type: "text",
+        text:
+          formattedCancelDate +
+          " " +
+          hotelName +
+          "のキャンセルが出たら通知します。",
+      },
+    ],
   });
 };
 
@@ -382,7 +528,8 @@ async function handleBot(req, res) {
       const userId = req.body.events[`0`].source.userId;
       dataString = confirmHotel(req);
       const insertSql = {
-        text: "INSERT INTO t_cancels(user_id, hotel_number, date) VALUES ($1, $2, $3)",
+        text:
+          "INSERT INTO t_cancels(user_id, hotel_number, date) VALUES ($1, $2, $3)",
         values: [userId, hotelNumber, cancelDate],
       };
       await db.doQuery(insertSql);
@@ -391,19 +538,19 @@ async function handleBot(req, res) {
     } else if (postbackData.type == "check") {
       dataString = await checkHotels(req);
     } else if (postbackData.type == "unregisterService") {
-      console.log("unregisterServiceです")
-      dataString = await selectUnregisterHotel(req)
+      console.log("unregisterServiceです");
+      dataString = await selectUnregisterHotel(req);
     } else if (postbackData.type == "unregisterHotel") {
-      console.log("unregisterHotelです")
-      console.log(postbackData)
-      dataString = confirmUnregister(req)
-      console.log("登録解除の確認dataString完")
-      console.log(postbackData.hotelNumber, postbackData.date)
+      console.log("unregisterHotelです");
+      console.log(postbackData);
+      dataString = confirmUnregister(req);
+      console.log("登録解除の確認dataString完");
+      console.log(postbackData.hotelNumber, postbackData.date);
       const deleteSql = {
         text: "DELETE from t_cancels where hotel_number = $1 AND date = $2",
         values: [postbackData.hotelNumber, postbackData.date],
-      }
-      await db.doQuery(deleteSql)
+      };
+      await db.doQuery(deleteSql);
     }
     request.write(dataString);
     request.end();
