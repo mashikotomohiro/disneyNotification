@@ -12,6 +12,7 @@ const axios = require('axios');
 const https = require('https');
 const db = require("./db");
 const { text } = require('express');
+const line = require("@line/bot-sdk");
 const client = new line.Client({
   channelAccessToken: process.env.LINE_ACCESS_TOKEN
 })
@@ -156,14 +157,14 @@ exports.search = async (targetHotels) => {
           let replyParams = {}
           targetHotels.forEach(tweetHotel => {
             const twitterHotelNumbers = tweetHotel.hotels.map(hotel => hotel.number)
-            if (twitterHotelNumbers.includes(cancelDate.number)) {
-              mainClient = new twitter(tweetHotel.client)
-              if ((cancelDate.number == 183493) || (cancelDate.number == 74733)) {
-                miraCostaClient = new twitter(tweetHotel.miraCostaClient)
-                displayErrorToSlack('トイストーリーきたあ', miraCostaClient)
-              }
-              replyParams.status = cancelDate.affiliateUrl
-            }
+            // if (twitterHotelNumbers.includes(cancelDate.number)) {
+            //   mainClient = new twitter(tweetHotel.client)
+            //   if ((cancelDate.number == 183493) || (cancelDate.number == 74733)) {
+            //     miraCostaClient = new twitter(tweetHotel.miraCostaClient)
+            //     displayErrorToSlack('トイストーリーきたあ', miraCostaClient)
+            //   }
+            //   replyParams.status = cancelDate.affiliateUrl
+            // }
           })
           console.log('clientだよ')
           console.log(mainClient)
@@ -245,17 +246,17 @@ exports.search = async (targetHotels) => {
           // await tweetVacantHotel(mainClient, mainParams, replyParams)
           await sendLine(cancelDate);
 
-          if (miraCostaClient) {
-            const subMedia = await miraCostaClient.post('media/upload', {
-              media: data
-            });
-            let subParams = {
-              status: text
-            }
-            subParams.media_ids = subMedia.media_id_string
-            displayErrorToSlack("ミラコスタきたよ", miraCostaClient)
-            await tweetVacantHotel(miraCostaClient, subParams, replyParams)
-          }
+          // if (miraCostaClient) {
+          //   const subMedia = await miraCostaClient.post('media/upload', {
+          //     media: data
+          //   });
+          //   let subParams = {
+          //     status: text
+          //   }
+          //   subParams.media_ids = subMedia.media_id_string
+          //   displayErrorToSlack("ミラコスタきたよ", miraCostaClient)
+          //   await tweetVacantHotel(miraCostaClient, subParams, replyParams)
+          // }
         } catch (e) {
           displayErrorToSlack(e.stack, cancelDate.displayUrl)
         } finally {
