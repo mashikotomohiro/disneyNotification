@@ -10,6 +10,11 @@ const baseAffiliateUrl = "http://hb.afl.rakuten.co.jp/hgc/" + affiliateId + "/"
 const planUrl = "https://hotel.travel.rakuten.co.jp/hotelinfo/plan/"
 const axios = require('axios');
 const https = require('https');
+const db = require("./db");
+const { text } = require('express');
+const client = new line.Client({
+  channelAccessToken: process.env.LINE_ACCESS_TOKEN
+})
 
 const getVacants = async (hotelNames, hotelNumbers) => {
   vacants = []
@@ -61,19 +66,10 @@ const getVacants = async (hotelNames, hotelNumbers) => {
         const planId = roomBasic.planId
         const daily = (rooms.find(room => room.dailyCharge)).dailyCharge
         const charge = daily.total
-        const stayDate = daily.stayDate
-        //元々のurl https://hotel.travel.rakuten.co.jp/hotelinfo/plan/?f_syu=mut1&f_heya_su=1&f_no=74733&f_flg=PLAN&f_hizuke=20221031&f_camp_id=4530538&scid=af_pc_etc&sc2id=af_101_0_0
-
-        // https://hotel.travel.rakuten.co.jp/hotelinfo/plan/?f_syu=mut1&f_heya_su=1&f_no=74733&f_flg=PLAN&f_hizuke=20221031&f_camp_id=4530538&scid=af_pc_etc&sc2id=af_101_0_0&f_nen1=2022&f_tuki1=10&f_hi1=31&f_nen2=2022&f_tuki2=11&f_hi2=1
-        //→にしたい https://hotel.travel.rakuten.co.jp/hotelinfo/plan/74733?f_camp_id=4530538&f_syu=mut1&f_teikei=&f_campaign=&f_flg=PLAN&f_otona_su=1&f_heya_su=1&f_s1=0&f_s2=0&f_y1=0&f_y2=0&f_y3=0&f_y4=0&f_kin=&f_kin2=0&f_nen1=2022&f_tuki1=10&f_hi1=31&f_nen2=2022&f_tuki2=11&f_hi2=1&f_hak=&f_tel=&f_tscm_flg=&f_p_no=&f_custom_code=&f_search_type=&f_static=0&f_service=&f_sort=
         query = planUrl + "?f_no=" + hotelNumber + "&f_flg=PLAN&f_heya_su=1&f_camp_id=" + planId + "&f_syu=" + roomClass + "&f_hizuke=" + checkinYear + checkinMonth + checkinDate + "&f_otona_su=1&f_thick=1&TB_iframe=true&height=768&width=1024"
-        // tryしたaffilliateQuary
         affiliateQuery =  planUrl + "?f_no=" + hotelNumber + "&f_flg=PLAN&f_heya_su=1&f_camp_id=" + planId + "&f_syu=" + roomClass + "&f_hizuke=" + checkinYear + checkinMonth + checkinDate + "&f_nen1=" + checkinYear + "&f_tuki1=" + checkinMonth + "&f_hi1=" + checkinDate + "&f_nen2=" + checkoutYear + "&f_tuki2=" + checkoutMonth + "&f_hi2=" + checkoutDate
-        // ↓が元々のaffiliateQuery
-        // affiliateQuery = planUrl + "?f_no=" + hotelNumber + "&f_flg=PLAN&f_heya_su=1&f_camp_id=" + planId + "&f_syu=" + roomClass + "&f_hizuke=" + checkinYear + checkinMonth + checkinDate
         queryPc = "pc=" + encodeURIComponent(query) + '&'
         queryM = "m=" + encodeURIComponent(query)
-        // https://hotel.travel.rakuten.co.jp/hotelinfo/plan/?f_syu=mut1&f_heya_su=1&f_no=74733&f_flg=PLAN&f_hizuke=20221031&f_camp_id=4530538&scid=af_pc_etc&sc2id=af_101_0_0
         affiliateQueryPc = "pc=" + encodeURIComponent(affiliateQuery) + '&'
         affiliateQueryM = "m=" + encodeURIComponent(affiliateQuery)
         displayUrl = baseAffiliateUrl + '?' + queryPc + queryM
@@ -245,7 +241,10 @@ exports.search = async (targetHotels) => {
             status: text
           }
           mainParams.media_ids = media.media_id_string
-          await tweetVacantHotel(mainClient, mainParams, replyParams)
+          // 一旦ツイートはコメントアウト ここは消さないで！！！
+          // await tweetVacantHotel(mainClient, mainParams, replyParams)
+          await sendLine(cancelDate);
+
           if (miraCostaClient) {
             const subMedia = await miraCostaClient.post('media/upload', {
               media: data
@@ -257,7 +256,6 @@ exports.search = async (targetHotels) => {
             displayErrorToSlack("ミラコスタきたよ", miraCostaClient)
             await tweetVacantHotel(miraCostaClient, subParams, replyParams)
           }
-          // await browser.close()
         } catch (e) {
           displayErrorToSlack(e.stack, cancelDate.displayUrl)
         } finally {
@@ -265,7 +263,6 @@ exports.search = async (targetHotels) => {
             await browser.close()
           }
         }
-        // browserがundefindの時ではないときのみclose 
       }
     }
 
@@ -297,6 +294,36 @@ const tweetVacantHotel = async (client, params, replyParams) => {
       console.log(error);
     }
   });
+}
+
+const sendLine = async (cancelDate) => {
+  console.log(cancelDate)
+  console.log(cancelDate.number)
+  // データベースからキャンセル登録している人を探す
+  // その人にメッセージを送る
+  const findUserSql = {
+    text: "SELECT * from t_cancels join m_hotels on t_cancels.hotel_number = m_hotels.hotel_number where t_cancels.hotel_number = $1 and t_cancels.date = $2",
+    values: [cancelDate.number, cancelDate.date]
+  }
+  console.log(findUserSql)
+  const sendUsers = await db.doQuery(findUserSql);
+  for(let user of sendUsers.rows) {
+    const userId = user["user_id"]
+    const date = user["date"]
+    const cancelMonth = (date.getMonth() + 1).toString();
+    const cancelDay = date.getDate().toString();
+    const formattedCancelDate = cancelMonth + "/" + cancelDay;
+    const hotelName = user["hotel_name"]
+    client.pushMessage(userId, [
+      {
+        type: "text",
+        text: formattedCancelDate + ":" + hotelName + "でキャンセルが出ました" 
+      }
+    ])
+    .catch((err) => {
+      console.log(err + "エラーです")
+    });
+  }
 }
 
 const displayErrorToSlack = (e, text) => {
