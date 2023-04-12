@@ -224,24 +224,24 @@ exports.search = async (targetHotels) => {
           }
           displayErrorToSlack("レアホテル出たからこれからツイートするよ", vacantNumInt)
           let nowSeconds = new Date()
-          const screenshotPath = nowSeconds.getSeconds() + nowSeconds.getMilliseconds() + '.png'
+          // const screenshotPath = nowSeconds.getSeconds() + nowSeconds.getMilliseconds() + '.png'
           await delay(100);
-          await page.screenshot({
-            path: screenshotPath
-          });
-          const data = fs.readFileSync(screenshotPath);
-          const lastMessages = ['に空きが出ましたね。', 'に空きが見つかりました。', 'に空室が見つかりました。']
-          const lastMessage = lastMessages[Math.floor(Math.random() * lastMessages.length)]
-          const baseText = cancelMonth + "/" + cancelDay + "(" + cancelDayOfWeekStr + ") " + "\n" +  cancelDate.displayName + "\n" + cancelDate.room + " (残り" + vacantNumInt + "室）" + "\n" + lastMessage + "\n"
-          let displayHashtagTexts = hashtagTexts.join(' ')
-          let text = baseText + displayHashtagTexts
-          const media = await mainClient.post('media/upload', {
-            media: data
-          });
-          let mainParams = {
-            status: text
-          }
-          mainParams.media_ids = media.media_id_string
+          // await page.screenshot({
+          //   path: screenshotPath
+          // });
+          // const data = fs.readFileSync(screenshotPath);
+          // const lastMessages = ['に空きが出ましたね。', 'に空きが見つかりました。', 'に空室が見つかりました。']
+          // const lastMessage = lastMessages[Math.floor(Math.random() * lastMessages.length)]
+          // const baseText = cancelMonth + "/" + cancelDay + "(" + cancelDayOfWeekStr + ") " + "\n" +  cancelDate.displayName + "\n" + cancelDate.room + " (残り" + vacantNumInt + "室）" + "\n" + lastMessage + "\n"
+          // let displayHashtagTexts = hashtagTexts.join(' ')
+          // let text = baseText + displayHashtagTexts
+          // const media = await mainClient.post('media/upload', {
+          //   media: data
+          // });
+          // let mainParams = {
+          //   status: text
+          // }
+          // mainParams.media_ids = media.media_id_string
           // 一旦ツイートはコメントアウト ここは消さないで！！！
           // await tweetVacantHotel(mainClient, mainParams, replyParams)
           await sendLine(cancelDate);
@@ -256,9 +256,9 @@ exports.search = async (targetHotels) => {
           //   subParams.media_ids = subMedia.media_id_string
           //   displayErrorToSlack("ミラコスタきたよ", miraCostaClient)
           //   await tweetVacantHotel(miraCostaClient, subParams, replyParams)
-          // }
+          // } 
         } catch (e) {
-          displayErrorToSlack(e.stack, cancelDate.displayUrl)
+          displayErrorToSlack(e.stack, cancelDate.displayUrl + "sendLineでエラーが出ました")
         } finally {
           if (browser != undefined) {
             await browser.close()
@@ -266,7 +266,6 @@ exports.search = async (targetHotels) => {
         }
       }
     }
-
   }
 }
 
@@ -300,6 +299,16 @@ const tweetVacantHotel = async (client, params, replyParams) => {
 const sendLine = async (cancelDate) => {
   console.log(cancelDate)
   console.log(cancelDate.number)
+  client.pushMessage("Udb72d201538a5208b82d2408397f756e", [
+    {
+      type: "text",
+      text: "キャンセルが出たよ" 
+    }
+  ])
+  .catch((err) => {
+    displayErrorToSlack("Line簡単な方の送信エラー", err)
+    console.log(err + "エラーです")
+  });
   // データベースからキャンセル登録している人を探す
   // その人にメッセージを送る
   const findUserSql = {
@@ -322,6 +331,7 @@ const sendLine = async (cancelDate) => {
       }
     ])
     .catch((err) => {
+      displayErrorToSlack("Line送信エラー", err)
       console.log(err + "エラーです")
     });
   }

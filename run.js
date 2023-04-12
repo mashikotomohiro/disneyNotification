@@ -1,4 +1,7 @@
 const vacants = require('./vacants.js');
+const monitor = require('./monitor.js');
+const express = require("express");
+const line = require("@line/bot-sdk");
 
 const miraCostaClient = {
   consumer_key: process.env.USJ_CONSUMER_KEY,
@@ -14,6 +17,14 @@ const disneyClient = {
   access_token_secret: process.env.MY_ACCESS_TOKEN_SECRET
 };
 
+const CONFIG = {
+  channelAccessToken: process.env.LINE_ACCESS_TOKEN,
+  channelSecret: process.env.LINE_CHANNEL_SECRET,
+};
+
+const PORT = 3000;
+
+
 // ----ここから修正
 
 const disneyHotels = [{name: 'ミラコスタ', number: 74733}, {name: '東京ディズニーセレブレーションホテル', number: 151431}, {name: '東京ディズニーランドホテル', number: 74732}, {name: 'ディズニーアンバサダーホテル', number: 72737}, {name: 'トイストーリーホテル', number: 183493}]
@@ -23,5 +34,10 @@ const disneyHashtagText = "#ディズニーホテル #予約 "
 
 
 const targetHotels = [{outline: 'ディズニー', hotels: disneyHotels, hashtagText: disneyHashtagText, client: disneyClient, miraCostaClient: miraCostaClient, userName: "@disney_htl\n"}];
+
+express()
+  .post("/webhook", line.middleware(CONFIG), (req, res) => monitor.handleBot(req, res))
+  .listen(PORT, () => console.log(`Listening on ${PORT}`));
+
 
 vacants.search(targetHotels)

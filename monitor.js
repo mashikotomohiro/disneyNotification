@@ -460,11 +460,12 @@ const confirmHotel = (req) => {
 };
 
 // 処理開始
-express()
-  .post("/webhook", line.middleware(CONFIG), (req, res) => handleBot(req, res))
-  .listen(PORT, () => console.log(`Listening on ${PORT}`));
+// express()
+//   .post("/webhook", line.middleware(CONFIG), (req, res) => handleBot(req, res))
+//   .listen(PORT, () => console.log(`Listening on ${PORT}`));
 
-async function handleBot(req, res) {
+exports.handleBot = async (req, res)  => {
+// async function handleBot(req, res) {
   await res.status(200).end();
   await req.body.events.map((event) => {
     console.log("event", event);
